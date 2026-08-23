@@ -144,6 +144,13 @@ def build_features() -> pd.DataFrame:
     # ---------------- trim ------------------------------------------------
     # Drop the warm-up buffer we deliberately downloaded for the rolling windows,
     # and the final session (no label exists for it yet).
+    # Restrict to the CONFIGURED universe. The raw tables are append-only, so a
+    # previous run with a different ticker list leaves its rows behind -- after
+    # switching universes, `prices` and `headlines` still held six names from the
+    # old list and they silently reappeared in the modelling panel (47 tickers
+    # where 41 were configured). The modelling universe is defined by config, not
+    # by whatever the database happens to contain.
+    df = df[df["ticker"].isin(SETTINGS.tickers)]
     df = df[(df["date"] >= SETTINGS.start_date) & (df["date"] <= SETTINGS.end_date)]
     df = df[df["n_headlines"] >= SETTINGS.min_headlines_per_day]
     df = df.dropna(subset=list(FEATURE_COLUMNS) + ["target_next_up"])

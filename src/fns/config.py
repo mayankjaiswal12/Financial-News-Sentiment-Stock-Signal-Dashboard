@@ -35,15 +35,30 @@ DB_URL = os.getenv("FNS_DB_URL", f"sqlite:///{DATA_DIR / 'fns.db'}")
 @dataclass(frozen=True)
 class Settings:
     # ---- universe -------------------------------------------------------
-    # A focused, liquid, high-news-volume subset of the NASDAQ-100.
-    # Chosen by ACTUAL headline coverage in the corpus, not by brand recognition:
-    # META has zero rows in FNSPID and GOOGL only ~1.7k (the coverage sits on the
-    # GOOG line), so including them would have injected thousands of empty
-    # ticker-days and quietly degraded the panel. Verified counts drove this list.
-    # ~104k headlines / ~15k ticker-days => ~7 headlines per name per day.
+    # Universe selected by MEASURED corpus coverage, not brand recognition.
+    # Criteria (see analysis in docs/CONCEPTS.md): a ticker is included if, over
+    # the 2019-2023 study window, it has headlines in >=80% of months and >=1,200
+    # headlines total. That yields 41 usable names and ~120k headlines.
+    # (EA and WBA meet the coverage bar but were taken private in 2025, so no
+    #  price vendor serves them any more -- a reverse-survivorship limitation
+    #  worth naming: we cannot study the names that left the index.)
+    #
+    # Two things this fixes at once:
+    #  * BREADTH. The Fundamental Law of Active Management says information ratio
+    #    scales as IC * sqrt(N). Going from 12 to 43 names is a ~1.9x multiplier
+    #    on the same per-name signal -- and breadth is what makes a weak
+    #    cross-sectional effect estimable at all.
+    #  * COVERAGE GAPS. The previous 12-name list was chosen for liquidity and
+    #    contained large holes (NVDA had 13 consecutive zero-headline months;
+    #    AAPL/MSFT/AMZN had almost no pre-2022 coverage). Only 6 of those 12
+    #    clear the coverage bar. Dropping famous tickers that the corpus barely
+    #    covers is a data-quality decision, not a liquidity one.
     tickers: tuple[str, ...] = (
-        "AAPL", "MSFT", "AMZN", "GOOG", "NVDA", "TSLA",
-        "AMD", "INTC", "MU", "QCOM", "NFLX", "COST",
+        "ADBE", "ADI", "ADSK", "ALGN", "AMAT", "AMD", "AMGN", "ASML", "BIIB",
+        "BKNG", "BKR", "CDNS", "CHTR", "CMCSA", "COST", "CRWD", "CSX", "DLTR",
+        "DXCM", "EBAY", "ENPH", "FANG", "FTNT", "GILD", "GOOG", "INTC",
+        "KHC", "MRVL", "MU", "PANW", "PDD", "PEP", "PYPL", "QCOM", "SBUX",
+        "TMUS", "TXN", "VRTX", "WDAY", "ZM", "ZS",
     )
     start_date: str = "2019-01-01"
     end_date: str = "2023-12-31"     # FNSPID headline coverage ends here
