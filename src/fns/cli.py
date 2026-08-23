@@ -46,6 +46,11 @@ def cmd_analyse(a):
     run_all()
 
 
+def cmd_xs(a):
+    from .cross_sectional import run
+    run(test_start=a.test_start)
+
+
 def cmd_train(a):
     from .train import print_results, run
     print_results(run(test_start=a.test_start))
@@ -69,7 +74,7 @@ def cmd_experiment(a):
 
 def cmd_all(a):
     cmd_ingest(a); cmd_score(a); cmd_features(a)
-    cmd_analyse(a); cmd_train(a); cmd_monitor(a); cmd_plots(a)
+    cmd_analyse(a); cmd_train(a); cmd_xs(a); cmd_monitor(a); cmd_plots(a)
     print("\nDone. Launch the dashboard with:  python -m fns.cli serve")
 
 
@@ -96,6 +101,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("analyse", help="lead-lag, IC, bucket diagnostics"); s.set_defaults(func=cmd_analyse)
     s = sub.add_parser("train", help="train + benchmark")
     s.add_argument("--test-start", default=None, dest="test_start"); s.set_defaults(func=cmd_train)
+    s = sub.add_parser("xs", help="cross-sectional ranking + long-short backtest")
+    s.add_argument("--test-start", default=None, dest="test_start"); s.set_defaults(func=cmd_xs)
     s = sub.add_parser("monitor", help="drift + rolling accuracy")
     s.add_argument("--model", default=None); s.set_defaults(func=cmd_monitor)
     s = sub.add_parser("plots", help="render figures")

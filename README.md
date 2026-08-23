@@ -11,8 +11,8 @@ baselines, serves it from FastAPI, and monitors it for drift.
 
 ## The headline result
 
-> **Sentiment dated day *D* correlates +0.234 with day *D*'s own return, and
-> +0.018 with day *D+1*'s.**
+> **Sentiment dated day *D* correlates +0.218 with day *D*'s own return
+> (p ≈ 1e-191), and −0.004 with day *D+1*'s.**
 >
 > Financial headlines mostly **report** moves rather than predict them. Once
 > that is corrected for, **no model beats "always predict up."**
@@ -30,77 +30,110 @@ entirely from letting a day's headlines describe that day's return.
 
 ---
 
-## Hold-out results (2023, 2,599 ticker-days)
+## Hold-out results (2023, 8,205 ticker-days)
 
-The bar every model must clear is **0.5483** — the rate at which these names
+The bar every model must clear is **0.5250** — the rate at which these names
 simply went up in 2023.
 
 | Model | Accuracy | Balanced acc. | ROC AUC | Sharpe |
 |---|---|---|---|---|
-| `baseline_always_up` | **0.5483** | 0.5000 | 0.5000 | 1.84 |
-| `hgb__sentiment_only` | 0.5452 | 0.5039 | 0.4890 | 1.66 |
-| `hgb__price_only` | 0.5271 | 0.5010 | 0.5000 | 0.71 |
-| `hgb__combined` | 0.5267 | 0.5024 | 0.4989 | 0.69 |
-| `baseline_sentiment_sign` | 0.5087 | 0.4918 | 0.4852 | 0.76 |
-| `baseline_ma_cross` | 0.4783 | 0.4622 | 0.4513 | −0.27 |
+| `baseline_always_up` | **0.5250** | 0.5000 | 0.5000 | 0.85 |
+| `hgb__sentiment_only` | 0.5196 | 0.4994 | 0.4940 | 0.69 |
+| `hgb__combined` | 0.5180 | 0.5015 | 0.4983 | 0.40 |
+| `hgb__price_only` | 0.5154 | 0.4993 | 0.4964 | 0.30 |
+| `baseline_sentiment_sign` | 0.5051 | 0.4944 | 0.4940 | 0.23 |
+| `logreg__combined` | 0.4946 | 0.4899 | 0.4914 | −0.34 |
+| `baseline_ma_cross` | 0.4875 | 0.4838 | 0.4822 | −0.32 |
 
 Every balanced accuracy sits within noise of 0.50 and every AUC within noise of
 0.50. **Daily FinBERT headline sentiment carries no exploitable next-day
-directional edge on mega-cap US tech.** The `always_up` Sharpe of 1.84 is not
-skill — it is 2023's tech rally.
+directional edge.** The `always_up` Sharpe of 0.85 is not skill — it is 2023's
+rally.
 
-Where signal *does* faintly appear (rank IC vs next-day return):
+Rank IC of `sent_mean` against the next-day return: **+0.0042 (p = 0.43)** over
+35,526 ticker-days, and it flips sign by year (−0.011, +0.040, +0.018, −0.011,
+−0.014). A signal that changes sign by regime is not a signal.
 
-| Feature | IC | p |
-|---|---|---|
-| `ret_1d` | −0.0380 | 0.000 |
-| `volume_z` (cross-sectionally demeaned) | −0.0326 | 0.001 |
-| `news_vol_z` (cross-sectionally demeaned) | −0.0232 | 0.022 |
-| `sent_mean` | −0.0013 | 0.895 |
+## Cross-sectional ranking — and what happened when the panel grew
 
-i.e. short-term **reversal** and **attention spikes**, not tone.
+Predicting *absolute* direction is dominated by the market factor. The better-posed
+question is **which of these 41 names beats the others tomorrow** — ranking within
+a day cancels the market, and the base rate becomes exactly **0.5000**, so accuracy
+is honest. Features are z-scored within each date; the book is dollar-neutral,
+long the top 3 and short the bottom 3, rebalanced daily.
 
----
+**On an earlier 12-name universe this looked promising:** ranking on raw sentiment
+gave mean IC **+0.0154** and a 2023 net Sharpe of **1.64**. That result did not
+survive.
+
+Expanding to 41 names — chosen by measured corpus coverage, giving 3.6× the panel
+and √(41/12) ≈ 1.8× the breadth — drove every variant to zero:
+
+| Model (2023 hold-out) | Accuracy | Mean IC | IC t-stat | Net Sharpe |
+|---|---|---|---|---|
+| `xs_logreg` | 0.4907 | −0.0010 | −0.07 | −1.50 |
+| `xs_hgb` | 0.4947 | −0.0123 | −0.86 | −1.95 |
+| `prior_composite` | 0.4936 | −0.0259 | −1.99 | −3.15 |
+| `rank_by_sentiment` | 0.4990 | −0.0034 | −0.29 | −1.91 |
+| `rank_by_sentiment` (full 1,245 days) | 0.4996 | **−0.0024** | −0.41 | −0.77 |
+
+**More data made the effect disappear, which is the signature of no effect.** A
+real edge gets *more* significant with more observations; noise regresses to zero.
+The 12-name +0.0154 was small-sample luck on a badly-covered universe.
+
+![cross-sectional](reports/fig_cross_sectional.png)
+
+Gross −9% cumulative over five years, net −59% after costs at ~150% daily turnover.
+There is no edge to consume before costs are even applied.
+
+### Why the learned models underperformed the unfitted rule
+
+On the 12-name panel the fitted models posted *negative* IC while a zero-parameter
+rule posted positive IC. Diagnosing that is the most transferable result here:
+
+1. **The fitted sign was a coin flip.** Refitting each year, the coefficient on
+   `sent_mean` was −0.032, −0.027, +0.006, −0.009. The model estimates a parameter
+   the data cannot determine, then applies the wrong guess out of sample.
+2. **Collinearity split the weight arbitrarily.** `sent_mean`, `sent_net`,
+   `sent_surprise` and `sent_ewma3` correlate at 0.75–0.91. The fit put −0.034 on
+   `sent_pos_frac` and +0.037 on `sent_neg_frac` — both inverted, and mutually
+   cancelling.
+3. **Selecting a fix on the test set *is* overfitting.** Eight candidate repairs
+   were tried. The apparent winner (3 decorrelated features, IC +0.009 on 2023)
+   reversed to **−0.021** under walk-forward across 2020–2023.
+
+The fixes applied — a single sentiment composite instead of six collinear columns,
+weights shrunk toward a stated economic prior rather than freely estimated, and
+shrinkage strength selected by walk-forward on *training data only*
+(`select_lambda_walkforward`) — are in `cross_sectional.py`. They are the right
+structural response. They did not manufacture a signal, because there is none.
 
 ## Data
 
 | | |
 |---|---|
-| **Headlines** | 80,343 real Nasdaq.com articles, 2019‑01‑02 → 2023‑12‑29, from [FNSPID](https://huggingface.co/datasets/benstaf/FNSPID-filtered-nasdaq-100) |
-| **Prices** | 15,900 daily bars from Yahoo Finance (Stooq fallback), split/dividend adjusted |
-| **Universe** | AAPL MSFT AMZN GOOG NVDA TSLA AMD INTC MU QCOM NFLX COST |
-| **Panel** | 9,781 ticker-days after feature warm-up and filtering |
-| **Sentiment** | `ProsusAI/finbert`, 757 headlines/sec on Apple MPS (80k in 106 s) |
+| **Headlines** | 116,250 real Nasdaq.com articles, 2019‑01‑02 → 2023‑12‑29, from [FNSPID](https://huggingface.co/datasets/benstaf/FNSPID-filtered-nasdaq-100) |
+| **Prices** | 54,018 daily bars from Yahoo Finance (Stooq fallback), split/dividend adjusted |
+| **Universe** | 41 NASDAQ-100 names with ≥80% monthly headline coverage and ≥1,200 headlines |
+| **Panel** | 35,526 ticker-days after feature warm-up and filtering |
+| **Sentiment** | `ProsusAI/finbert`, ~750 headlines/sec on Apple MPS |
 
-The universe was chosen by **measured headline coverage**, not brand
-recognition: META has zero rows in this corpus and GOOGL only ~1.7k (coverage
-sits on the GOOG line), so including them would have injected thousands of empty
-ticker-days.
-
-### Coverage is uneven — and it is checked, not assumed
+The universe is chosen by **measured corpus coverage**, not brand recognition.
+A ticker is included only if it has headlines in ≥80% of months across 2019–2023
+and ≥1,200 headlines in total.
 
 ![coverage](reports/fig_coverage.png)
 
-FNSPID's per-ticker coverage has real holes: AAPL and MSFT have almost nothing
-before 2022, AMZN nothing before 2023, and NVDA has **13 consecutive
-zero-coverage months** (2020‑07 → 2021‑07). Total corpus volume also grows ~6×
-from 2019 to 2023. Together these make the panel unbalanced and are the direct
-cause of the PSI drift the monitor reports.
+This matters more than it sounds. The famous mega-caps are *badly* covered by
+FNSPID: META has zero rows, NVDA has 13 consecutive zero-headline months
+(2020‑07 → 2021‑07), and AAPL, MSFT and AMZN have almost nothing before 2022.
+**Only 6 of an earlier 12-name liquid universe clear the coverage bar.** Dropping
+AAPL and NVDA from a stock project feels wrong right up until you measure how
+little the corpus says about them — at which point keeping them is the mistake.
 
-**Robustness check** — re-running on the six names with continuous 2019–2023
-coverage (AMD, COST, GOOG, INTC, MU, QCOM; 6,901 ticker-days):
-
-| Model | Accuracy | Balanced acc. | ROC AUC |
-|---|---|---|---|
-| `baseline_always_up` | **0.5404** | 0.5000 | 0.5000 |
-| `hgb__sentiment_only` | 0.5299 | 0.4919 | 0.4896 |
-| `hgb__price_only` | 0.5104 | 0.4911 | 0.5057 |
-| `hgb__combined` | 0.5084 | 0.4864 | 0.4898 |
-
-IC of `sent_mean` on the balanced panel: **−0.0112 (p = 0.35)**. The conclusion
-is unchanged, so it is a property of the signal rather than of the gaps.
-
----
+Two names (EA, WBA) meet the coverage bar but were taken private in 2025, so no
+price vendor serves them any more. That is a *reverse*-survivorship limitation
+worth naming: the dataset cannot study the companies that left.
 
 ## Quick start
 
@@ -204,10 +237,15 @@ Two signals, because they fail differently:
   indicator that fires the day the *input* shifts, before enough outcomes exist
   to prove accuracy fell.
 
-Current state on 2023 data: **DRIFT** — PSI 0.325 (the 2023 news distribution
-genuinely differs from 2019–2022) and rolling accuracy 0.540 below the
-always-up baseline of 0.587. The monitor is correctly refusing to certify a
-model that does not work.
+Current state on 2023 data: **WARN** — rolling accuracy 0.508 against an
+always-up baseline of 0.572. The monitor correctly refuses to certify a model
+that does not beat its baseline.
+
+PSI on sentiment is **0.054**, comfortably inside tolerance. On the earlier
+12-name universe it was **0.325** — a major drift alert driven almost entirely by
+those coverage holes rather than by any real change in the news. Fixing the
+universe fixed the drift, which is a good illustration of the monitor pointing at
+a genuine data problem rather than a model problem.
 
 ![monitoring](reports/fig_monitoring.png)
 
@@ -215,24 +253,22 @@ model that does not work.
 
 ## Known limitations
 
-* **Unbalanced coverage.** See the heatmap above. The balanced-subset check
-  reproduces the result, but the full-panel training set is dominated by the six
-  continuously-covered names.
 * **One corpus, date-only timestamps.** FNSPID stamps every article at 00:00
   UTC, so intraday precision is impossible; the extra session of lag is the
   conservative response. Real intraday timestamps would let the cutoff do the
   work and would likely recover some decayed signal.
-* **12 mega-caps.** The most efficiently-priced, most-covered names in the
-  market — the hardest place to find news alpha. Small caps would be a fairer
-  test of the hypothesis.
-* **Survivorship.** The universe is chosen with hindsight from today's index.
+* **41 large caps.** The most efficiently-priced names in the market — the
+  hardest place to find news alpha. Small caps would be a fairer test.
+* **Survivorship, in both directions.** The universe is drawn with hindsight from
+  today's index, and names that were delisted (EA, WBA) cannot be priced at all.
 * **Gross of costs.** No spread, slippage or borrow.
 * **FinBERT scores tone, not surprise.** "Beats by $0.02" and "beats by $2.00"
   read alike; the market only cares about the gap to expectations.
 
 ## Next steps
 
-Cross-sectional ranking instead of absolute direction; intraday timestamps and
+~~Cross-sectional ranking~~ and ~~breadth expansion~~ — both built, see above.
+Remaining: intraday timestamps and
 minute-bar reaction windows; event-type classification (earnings/guidance/legal)
 so tone is conditioned on what kind of news it is; analyst-estimate data to turn
 tone into surprise.

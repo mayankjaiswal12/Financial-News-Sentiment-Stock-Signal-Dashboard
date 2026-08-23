@@ -162,14 +162,21 @@ def plot_coverage() -> str:
              .fillna(0).astype(int).sort_index())
 
     _style()
-    fig, ax = plt.subplots(figsize=(12, 4.2))
+    fig, ax = plt.subplots(figsize=(12, 8))
     sns.heatmap(piv.replace(0, np.nan), cmap="Blues", ax=ax,
                 cbar_kws={"label": "headlines / month"},
                 linewidths=0.4, linecolor="white")
+    # Show EVERY ticker: with 41 names matplotlib thins the labels by default,
+    # which hides exactly the rows a coverage audit exists to inspect.
+    ax.set_yticks(np.arange(len(piv.index)) + 0.5)
+    ax.set_yticklabels(piv.index, rotation=0, fontsize=7)
     ax.set_xticks(np.arange(0, piv.shape[1], 6) + 0.5)
     ax.set_xticklabels([d.strftime("%Y-%m") for d in piv.columns[::6]], rotation=0)
     ax.set_xlabel(""); ax.set_ylabel("")
-    ax.set_title("Headline coverage is uneven - white cells are months with NO news")
+    # Title reports the post-fix state. The universe is now SELECTED for
+    # coverage, so near-complete rows are the expected result, not a lucky one.
+    ax.set_title("Coverage after selecting the universe on it - "
+                 "white cells are months with no news")
     return _save(fig, "fig_coverage.png")
 
 
@@ -243,6 +250,45 @@ def plot_sentiment_buckets() -> str:
     return _save(fig, "fig_sentiment_buckets.png")
 
 
+def plot_cross_sectional() -> str:
+    """Cumulative long-short PnL, gross vs net of costs.
+
+    Two series on ONE axis (both are cumulative return, so they are directly
+    comparable -- this is exactly the case where a shared scale is correct).
+    Drawing gross and net together is the point of the chart: the gap between
+    them IS the transaction cost, and for a daily-rebalanced book with ~150%
+    turnover that gap is most of the signal.
+    """
+    from .cross_sectional import run as xs_run
+    res = xs_run(verbose=False)
+    bt = res["rank_by_sentiment_full"]["backtest"].copy()
+    if bt.empty:
+        raise ValueError("empty backtest")
+    bt["cum_gross"] = (1 + bt["gross_ret"]).cumprod() - 1
+    bt["cum_net"] = (1 + bt["net_ret"]).cumprod() - 1
+
+    _style()
+    fig, ax = plt.subplots(figsize=(10, 4.6))
+    ax.plot(bt["date"], 100 * bt["cum_gross"], color=BLUE, lw=1.8, label="gross")
+    ax.plot(bt["date"], 100 * bt["cum_net"], color=ORANGE, lw=1.8, label="net of 2bps/side")
+    ax.axhline(0, color=MUTED, lw=1)
+    ax.fill_between(bt["date"], 100 * bt["cum_net"], 100 * bt["cum_gross"],
+                    color=CRITICAL, alpha=0.08)
+    for col, colr, lbl in [("cum_gross", BLUE, "gross"), ("cum_net", ORANGE, "net")]:
+        ax.annotate(f"{100*bt[col].iloc[-1]:+.0f}%",
+                    (bt["date"].iloc[-1], 100 * bt[col].iloc[-1]),
+                    color=colr, fontsize=9, va="center",
+                    xytext=(6, 0), textcoords="offset points")
+    ax.set_ylabel("cumulative return (%)")
+    # Title states what the data shows, not what we hoped it would show. On the
+    # 41-name panel the book is negative even GROSS, so "costs ate the edge"
+    # would overstate the result -- there is no edge to eat.
+    ax.set_title("Cross-sectional sentiment long-short: no edge gross, "
+                 "and costs on top of that")
+    ax.legend(loc="upper left", frameon=False, ncols=2)
+    return _save(fig, "fig_cross_sectional.png")
+
+
 def generate_all(ticker: str = "NVDA") -> list[str]:
     out = [
         plot_lead_lag(),
@@ -250,6 +296,7 @@ def generate_all(ticker: str = "NVDA") -> list[str]:
         plot_sentiment_vs_price(ticker),
         plot_model_comparison(),
         plot_sentiment_buckets(),
+        plot_cross_sectional(),
     ]
     try:
         out.append(plot_monitoring())
