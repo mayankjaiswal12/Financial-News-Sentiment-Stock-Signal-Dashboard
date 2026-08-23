@@ -1,0 +1,33 @@
+# ---- core data stack ----
+pandas==3.0.5
+numpy==2.5.2
+pyarrow==17.0.0            # parquet reader for the FNSPID headline corpus
+
+# ---- ML ----
+scikit-learn==1.5.2
+joblib>=1.4.0             # model persistence; imported directly, so pinned explicitly
+scipy>=1.16.0             # <1.16 warns/breaks against numpy 2.5
+
+# ---- transformer sentiment (FinBERT) ----
+torch==2.4.1
+transformers==4.44.2
+huggingface-hub==0.24.7
+safetensors==0.4.5
+
+# ---- market data ----
+yfinance>=1.6.0             # Yahoo changed their API in 2024; older pins silently return empty
+
+# ---- storage ----
+SQLAlchemy>=2.0.36        # pandas 3.x silently falls back to raw sqlite3 below this
+
+# ---- serving ----
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+jinja2==3.1.4
+
+# ---- plotting ----
+matplotlib==3.9.2
+seaborn==0.13.2
+
+# ---- dev ----
+pytest==8.3.3
