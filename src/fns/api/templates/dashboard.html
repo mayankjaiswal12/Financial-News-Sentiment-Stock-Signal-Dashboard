@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Financial News Sentiment &amp; Stock Signal</title>
+<style>
+  /* Light palette defined on :root, dark redefined under both the OS media
+     query and an explicit [data-theme] stamp, so a toggle wins either way. */
+  :root{
+    --surface:#fcfcfb; --card:#ffffff; --ink:#0b0b0b; --muted:#52514e;
+    --grid:#e4e2dc; --blue:#2a78d6; --orange:#eb6834; --red:#e34948; --green:#008300;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --surface:#1a1a19; --card:#232322; --ink:#ffffff; --muted:#c3c2b7;
+      --grid:#3a3a37; --blue:#3987e5; --orange:#d95926; --red:#e66767;
+    }
+  }
+  :root[data-theme="dark"]{
+    --surface:#1a1a19; --card:#232322; --ink:#ffffff; --muted:#c3c2b7;
+    --grid:#3a3a37; --blue:#3987e5; --orange:#d95926; --red:#e66767;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--surface);color:var(--ink);
+       font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 64px}
+  h1{font-size:24px;margin:0 0 4px}
+  h2{font-size:17px;margin:34px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--grid)}
+  .sub{color:var(--muted);margin:0 0 22px;font-size:14px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .tile{background:var(--card);border:1px solid var(--grid);border-radius:10px;padding:14px 16px}
+  .tile .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .tile .v{font-size:22px;font-weight:640;margin-top:4px;font-variant-numeric:tabular-nums}
+  .card{background:var(--card);border:1px solid var(--grid);border-radius:10px;
+        padding:16px;margin-top:14px}
+  /* Wide content scrolls inside its own container; the page never scrolls sideways. */
+  .scroll{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:640px}
+  th,td{text-align:right;padding:7px 10px;border-bottom:1px solid var(--grid);
+        font-variant-numeric:tabular-nums;white-space:nowrap}
+  th:first-child,td:first-child{text-align:left;font-variant-numeric:normal}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em}
+  tr.base td{color:var(--muted)}
+  tr.best td{font-weight:650}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600}
+  .ok{background:color-mix(in srgb,var(--green) 16%,transparent);color:var(--green)}
+  .warn{background:color-mix(in srgb,var(--orange) 18%,transparent);color:var(--orange)}
+  .drift{background:color-mix(in srgb,var(--red) 16%,transparent);color:var(--red)}
+  figure{margin:0 0 18px}
+  figure img{width:100%;height:auto;border:1px solid var(--grid);border-radius:8px;background:#fff}
+  figcaption{color:var(--muted);font-size:13px;margin-top:6px}
+  .note{border-left:3px solid var(--orange);padding:10px 14px;background:var(--card);
+        border-radius:0 8px 8px 0;margin:14px 0;font-size:14px}
+  code{background:color-mix(in srgb,var(--muted) 14%,transparent);padding:1px 5px;border-radius:4px;font-size:13px}
+  a{color:var(--blue)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Financial News Sentiment &amp; Stock Signal</h1>
+  <p class="sub">FinBERT headline sentiment &rarr; next-day direction, evaluated
+     under strict point-in-time discipline.
+     Universe: {{ tickers|join(', ') }} &middot; hold-out from {{ test_start }}.</p>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">Headlines</div><div class="v">{{ "{:,}".format(n_headlines) }}</div></div>
+    <div class="tile"><div class="k">FinBERT scored</div><div class="v">{{ "{:,}".format(n_scored) }}</div></div>
+    <div class="tile"><div class="k">Ticker-days</div><div class="v">{{ "{:,}".format(n_features) }}</div></div>
+    <div class="tile"><div class="k">Tickers</div><div class="v">{{ tickers|length }}</div></div>
+    <div class="tile"><div class="k">News lag</div><div class="v">{{ extra_lag }} session</div></div>
+  </div>
+
+  <div class="note">
+    <strong>Headline finding.</strong> Sentiment dated <em>D</em> correlates
+    <strong>+0.23</strong> with session <em>D</em>&rsquo;s own return but only
+    <strong>+0.02</strong> with <em>D+1</em>&rsquo;s. These headlines mostly
+    <em>report</em> moves rather than predict them, so the pipeline withholds
+    each article for one extra session. Under that constraint no model beats
+    &ldquo;always predict up&rdquo; &mdash; which is the correct result, not a bug.
+  </div>
+
+  <h2>Model evaluation &mdash; hold-out</h2>
+  <div class="card scroll">
+  {% if results %}
+    <table>
+      <thead><tr>
+        <th>Model</th><th>Accuracy</th><th>Balanced acc.</th><th>ROC AUC</th>
+        <th>Pred up-rate</th><th>Mean ret (bps)</th><th>Sharpe</th><th>N</th>
+      </tr></thead>
+      <tbody>
+      {% for r in results %}
+        <tr class="{% if r.model.startswith('baseline') %}base{% endif %}{% if r.model == champion %} best{% endif %}">
+          <td>{{ r.model }}{% if r.model == champion %} &bull;{% endif %}</td>
+          <td>{{ "%.4f"|format(r.accuracy) }}</td>
+          <td>{{ "%.4f"|format(r.balanced_accuracy) }}</td>
+          <td>{{ "%.4f"|format(r.roc_auc) }}</td>
+          <td>{{ "%.3f"|format(r.pred_up_rate) }}</td>
+          <td>{{ "%.2f"|format(r.mean_ret_bps) }}</td>
+          <td>{{ "%.3f"|format(r.sharpe) }}</td>
+          <td>{{ r.n }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="sub">No metrics yet &mdash; run <code>python -m fns.cli train</code>.</p>
+  {% endif %}
+  </div>
+
+  <h2>Monitoring &amp; drift</h2>
+  <div class="card scroll">
+  {% if monitor %}
+    <table>
+      <thead><tr><th>Model</th><th>As of</th><th>Rolling acc.</th>
+        <th>Baseline</th><th>PSI</th><th>Status</th><th>Note</th></tr></thead>
+      <tbody>
+      {% for m in monitor %}
+        <tr>
+          <td>{{ m.model }}</td>
+          <td>{{ m.asof_date }}</td>
+          <td>{{ "%.4f"|format(m.rolling_accuracy) }}</td>
+          <td>{{ "%.4f"|format(m.baseline_accuracy) }}</td>
+          <td>{{ "%.3f"|format(m.psi_sent_mean) }}</td>
+          <td><span class="pill {{ 'ok' if m.status=='OK' else ('warn' if m.status=='WARN' else 'drift') }}">{{ m.status }}</span></td>
+          <td style="text-align:left;white-space:normal">{{ m.note }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="sub">No monitoring records yet.</p>
+  {% endif %}
+  </div>
+
+  <h2>Figures</h2>
+  {% for f in figures %}
+    <figure>
+      <img src="/figures/{{ f }}" alt="{{ f }}" loading="lazy">
+      <figcaption>{{ f }}</figcaption>
+    </figure>
+  {% endfor %}
+
+  <h2>API</h2>
+  <div class="card">
+    <p class="sub" style="margin:0">
+      Interactive docs at <a href="/docs">/docs</a> &middot;
+      <code>GET /health</code> &middot; <code>GET /signal?ticker=NVDA</code> &middot;
+      <code>GET /metrics</code> &middot; <code>GET /monitor</code> &middot;
+      <code>POST /predict</code>
+    </p>
+  </div>
+
+</div>
+</body>
+</html>
