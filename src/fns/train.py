@@ -199,6 +199,14 @@ def run(test_start: str | None = None, persist: bool = True) -> pd.DataFrame:
     # ---- persist --------------------------------------------------------
     if persist:
         import joblib
+        # Predictions are a pure function of the current model + features, so a
+        # persisted run REPLACES them. Without this, models from a previous
+        # universe or feature set linger and the monitor keeps reporting on a
+        # model that no longer exists (a stale `hgb__sentiment_only` from the
+        # 12-ticker run showed up in the monitor after the universe changed).
+        from .db import get_engine
+        with get_engine().begin() as conn:
+            conn.execute(pred_tbl.delete())
         champion = res.iloc[0]["model"]
         model, cols = fitted[champion]
         joblib.dump({"model": model, "features": cols, "name": champion},
