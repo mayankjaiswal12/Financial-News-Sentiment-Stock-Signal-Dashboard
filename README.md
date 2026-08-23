@@ -77,6 +77,29 @@ recognition: META has zero rows in this corpus and GOOGL only ~1.7k (coverage
 sits on the GOOG line), so including them would have injected thousands of empty
 ticker-days.
 
+### Coverage is uneven — and it is checked, not assumed
+
+![coverage](reports/fig_coverage.png)
+
+FNSPID's per-ticker coverage has real holes: AAPL and MSFT have almost nothing
+before 2022, AMZN nothing before 2023, and NVDA has **13 consecutive
+zero-coverage months** (2020‑07 → 2021‑07). Total corpus volume also grows ~6×
+from 2019 to 2023. Together these make the panel unbalanced and are the direct
+cause of the PSI drift the monitor reports.
+
+**Robustness check** — re-running on the six names with continuous 2019–2023
+coverage (AMD, COST, GOOG, INTC, MU, QCOM; 6,901 ticker-days):
+
+| Model | Accuracy | Balanced acc. | ROC AUC |
+|---|---|---|---|
+| `baseline_always_up` | **0.5404** | 0.5000 | 0.5000 |
+| `hgb__sentiment_only` | 0.5299 | 0.4919 | 0.4896 |
+| `hgb__price_only` | 0.5104 | 0.4911 | 0.5057 |
+| `hgb__combined` | 0.5084 | 0.4864 | 0.4898 |
+
+IC of `sent_mean` on the balanced panel: **−0.0112 (p = 0.35)**. The conclusion
+is unchanged, so it is a property of the signal rather than of the gaps.
+
 ---
 
 ## Quick start
@@ -192,6 +215,9 @@ model that does not work.
 
 ## Known limitations
 
+* **Unbalanced coverage.** See the heatmap above. The balanced-subset check
+  reproduces the result, but the full-panel training set is dominated by the six
+  continuously-covered names.
 * **One corpus, date-only timestamps.** FNSPID stamps every article at 00:00
   UTC, so intraday precision is impossible; the extra session of lag is the
   conservative response. Real intraday timestamps would let the cutoff do the
