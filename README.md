@@ -5,6 +5,12 @@ Hugging Face transformer (FinBERT), joins them to daily prices in SQL, trains a
 scikit-learn classifier for next-day direction, benchmarks it against honest
 baselines, serves it from FastAPI, and monitors it for drift.
 
+It is built to answer the question *correctly* rather than to produce a
+flattering number — and the correct answer turns out to be **no edge**. The
+project's real output is the machinery that establishes that: a point-in-time
+harness, a leakage experiment that quantifies the alternative, and a
+cross-sectional backtest reported net of costs.
+
 **Python · Transformers · scikit-learn · FastAPI · SQL · Pandas/NumPy · Matplotlib/Seaborn**
 
 ---
@@ -39,9 +45,11 @@ simply went up in 2023.
 |---|---|---|---|---|
 | `baseline_always_up` | **0.5250** | 0.5000 | 0.5000 | 0.85 |
 | `hgb__sentiment_only` | 0.5196 | 0.4994 | 0.4940 | 0.69 |
-| `hgb__combined` | 0.5180 | 0.5015 | 0.4983 | 0.40 |
-| `hgb__price_only` | 0.5154 | 0.4993 | 0.4964 | 0.30 |
+| `hgb__combined` | 0.5157 | 0.4991 | 0.4970 | 0.31 |
+| `hgb__price_only` | 0.5142 | 0.4983 | 0.4956 | 0.29 |
 | `baseline_sentiment_sign` | 0.5051 | 0.4944 | 0.4940 | 0.23 |
+| `logreg__sentiment_only` | 0.4968 | 0.4930 | 0.4906 | −0.14 |
+| `logreg__price_only` | 0.4965 | 0.4902 | 0.4918 | −0.27 |
 | `logreg__combined` | 0.4946 | 0.4899 | 0.4914 | −0.34 |
 | `baseline_ma_cross` | 0.4875 | 0.4838 | 0.4822 | −0.32 |
 
@@ -141,12 +149,14 @@ worth naming: the dataset cannot study the companies that left.
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt && pip install -e .
 
-python -m fns.cli all      # ingest → score → features → analyse → train → monitor → plots
+python -m fns.cli all      # ingest → score → features → analyse → train → xs → monitor → plots
 python -m fns.cli serve    # dashboard at http://127.0.0.1:8000
 ```
 
-First run downloads ~1 GB (headline corpus + FinBERT weights) and takes roughly
-10 minutes; everything is cached, so later runs take seconds. No API keys.
+First run downloads ~1.3 GB (824 MB headline corpus + FinBERT weights) and takes
+roughly 10 minutes, of which ~2.5 minutes is scoring 116k headlines on GPU.
+Everything is cached — **a warm re-run of the entire pipeline takes 24 seconds.**
+No API keys required.
 
 Individual stages (each idempotent and separately re-runnable):
 
@@ -156,6 +166,7 @@ python -m fns.cli score       # FinBERT; skips anything already scored
 python -m fns.cli features    # build the modelling table
 python -m fns.cli analyse     # lead-lag, information coefficient, quantile buckets
 python -m fns.cli train       # baselines + logreg/HGB, ablated by feature block
+python -m fns.cli xs          # cross-sectional ranking + long-short backtest
 python -m fns.cli monitor     # rolling accuracy + PSI drift
 python -m fns.cli experiment  # the leaky-vs-honest comparison
 pytest -q                     # 13 tests
@@ -172,8 +183,10 @@ of the `prices` table, so holidays are exact), then applies one extra session of
 lag. That last step is not paranoia — it is what the lead-lag study demands.
 
 **2. Chronological splits everywhere.** Train 2019–2022, test 2023. Tuning uses
-`TimeSeriesSplit`. A random split on a 12-name panel would put NVDA's Tuesday in
-train and AAPL's Tuesday in test, leaking the market factor.
+`TimeSeriesSplit`. A random split on a 41-name panel would put AMD's Tuesday in
+train and INTC's Tuesday in test; market-wide moves make those labels highly
+correlated, so that leaks the market factor — easily 5–10 points of fantasy
+accuracy.
 
 **3. Baselines reported beside every number.** `always_up`, MA-crossover, and
 raw sentiment sign.
@@ -181,10 +194,20 @@ raw sentiment sign.
 **4. Ablation by feature block.** Sentiment-only vs price-only vs combined — the
 only way to tell "sentiment works" from "momentum works and sentiment came along".
 
-**5. Economics, not just accuracy.** Mean return in bps and Sharpe, gross of
-costs (stated, not hidden — daily turnover at ~1–2 bps/side would consume these).
+**5. Economics, not just accuracy.** Directional accuracy is a weak proxy —
+being right on twenty +0.1% days and wrong on one −5% day is a losing strategy
+with 95% accuracy. Every return is reported in bps/day and Sharpe, and the
+cross-sectional book is reported **gross and net** of 2 bps/side against ~150%
+daily turnover.
 
-**6. Tests on the invariants that fail silently.** Weekend/holiday rollover,
+**6. Selection is treated as fitting.** Choosing a model variant by looking at
+the hold-out overfits exactly like a parameter does. Eight candidate repairs for
+the cross-sectional model were tried; the apparent winner reversed from +0.009
+to −0.021 under walk-forward. The shrinkage strength is therefore selected by
+walk-forward inside the training period (`select_lambda_walkforward`), and the
+hold-out is touched once.
+
+**7. Tests on the invariants that fail silently.** Weekend/holiday rollover,
 `fwd_ret_1d` equalling the true next-session return, upsert idempotency, PSI
 behaviour, and a guard on FinBERT's non-alphabetical label order.
 
@@ -195,9 +218,11 @@ behaviour, and a guard on FinBERT's non-alphabetical label order.
 ```
 FNSPID parquet ─┐
                 ├─► headlines ──► FinBERT ──► sentiment ─┐
-Yahoo/Stooq ────┴─► prices ──────────────────────────────┼─► features ─► train ─► predictions
-                                                          │                          │
-                                                          └──────────► monitor ◄──────┘
+Yahoo/Stooq ────┴─► prices ──────────────────────────────┼─► features ─┬─► train ─► predictions
+                                                          │             │              │
+                                                          │             └─► cross_sectional
+                                                          │                            │
+                                                          └──────────► monitor ◄───────┘
                                                                           │
                                                               FastAPI + dashboard
 ```
@@ -214,6 +239,7 @@ src/fns/
 ├── analysis.py          lead-lag, information coefficient, quantile buckets
 ├── baselines.py         always-up, MA crossover, sentiment sign
 ├── train.py             chronological split, ablation, benchmarking
+├── cross_sectional.py   within-day ranking, rank IC, long-short backtest
 ├── experiments.py       the leaky-vs-honest comparison
 ├── monitor.py           rolling accuracy + PSI drift alerting
 ├── plots.py             Matplotlib/Seaborn figures
@@ -237,7 +263,7 @@ Two signals, because they fail differently:
   indicator that fires the day the *input* shifts, before enough outcomes exist
   to prove accuracy fell.
 
-Current state on 2023 data: **WARN** — rolling accuracy 0.508 against an
+Current state on 2023 data: **WARN** — rolling accuracy 0.505 against an
 always-up baseline of 0.572. The monitor correctly refuses to certify a model
 that does not beat its baseline.
 
@@ -272,6 +298,16 @@ Remaining: intraday timestamps and
 minute-bar reaction windows; event-type classification (earnings/guidance/legal)
 so tone is conditioned on what kind of news it is; analyst-estimate data to turn
 tone into surprise.
+
+## Documentation
+
+Three documents, in increasing depth:
+
+| File | What it is |
+|---|---|
+| `docs/WALKTHROUGH.md` | The narrative — each stage, the decisions behind it, and the questions to expect about it |
+| `docs/CONCEPTS.md` | The ideas: lookahead bias, why financial NLP needs its own model, IC and its calibration, base rates, breadth and the Fundamental Law, shrinkage, turnover, market efficiency, PSI |
+| `docs/LINE_BY_LINE.md` | Every non-trivial line: what it does, and why it is written that way rather than the obvious alternative |
 
 ## Licence & attribution
 
